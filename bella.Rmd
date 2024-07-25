@@ -1,0 +1,236 @@
+---
+title: "bellabeat case study"
+output: html_document
+date: "2024-07-25"
+---
+
+Installing packages and opening libraries 
+```{r}
+install.packages('tidyverse')
+install.packages("janitor")
+install.packages("lubridate")
+install.packages("ggpubr") 
+install.packages("here")
+install.packages("skimr")
+install.packages("ggrepel")
+library(ggpubr)
+library(tidyverse)
+library(here)
+library(skimr)
+library(janitor)
+library(lubridate)
+library(ggrepel)
+library(dplyr)
+
+```
+
+importing the data
+
+```{r}
+daily_activity <- read.csv("dailyActivity_merged.csv")
+daily_calories<-read.csv("dailyCalories_merged.csv")
+daily_steps<-read.csv("dailySteps_merged.csv")
+sleep_day <- read.csv("sleepDay_merged.csv")
+
+```
+
+
+
+
+# preview the selected tables
+
+head(daily_activity,3)
+head(daily_calories,3)
+head(daily_steps,3)
+head(sleep_day,3)
+
+### cleaning and formatting
+
+# to the number of users (id) whose data is available 
+n_unique(daily_activity$Id)
+n_unique(sleep_day$Id)
+n_unique(daily_calories$Id)
+n_unique(daily_steps$Id)
+
+# to check for duplicates
+
+sum(duplicated(daily_activity))
+sum(duplicated(sleep_day))
+sum(duplicated(daily_calories))
+sum(duplicated(daily_steps))
+
+
+# removing duplicates and na
+sleep_day <- sleep_day %>%
+  distinct() %>%
+  na.omit(sleep_day)
+
+sum(duplicated(sleep_day))
+
+###formatting time and date columns
+
+daily_activity$ActivityDate=as.POSIXct(daily_activity$ActivityDate,
+                                       format = "%d/%m/%Y",tz = Sys.timezone())
+  
+sleep_day$SleepDay=as.POSIXct(sleep_day$SleepDay, 
+                              format = "%m/%d/%Y %I:%M:%S %p",tz = Sys.timezone())
+
+#renaming column for easier merging
+sleep_day <- rename(sleep_day, ActivityDate = SleepDay)
+
+#obtaining Day of Week from date
+
+
+daily_activity<- daily_activity%>%
+  mutate(Day=weekdays(daily_activity$ActivityDate))
+
+
+# converting minutes to hours
+
+
+sleep_day<- sleep_day%>%
+  mutate(Day=weekdays(sleep_day$ActivityDate))%>%
+  mutate(Hours_slept=sleep_day$TotalMinutesAsleep/60)
+
+head(sleep_day)
+
+
+###merging datasets
+daily_activity_sleep <- merge(daily_activity, sleep_day, by=c ("Id","ActivityDate","Day"))
+daily_activity_sleep
+
+
+#################################################################
+#ANANLYSIS
+
+#### USAGE TYPE DISTRIBUTION
+#Here we will ascertain how often the participants use their watches.
+#With daily_activity, we will assume that days with < 300 TotalSteps taken, 
+#are days where users have not used their watches.
+#We will filter out these inactive day and assign the following designations:
+#Low Use - 1 to 14 days o
+#Moderate Use - 15 to 21 days
+#High Use - 22 to 31 days
+
+daily_use2 <- daily_activity %>%
+  filter(TotalSteps >300 ) %>% 
+  group_by(Id) %>%
+  summarize(ActivityDate=sum(n())) %>%
+  mutate(usage = case_when(
+    ActivityDate >= 1 & ActivityDate <= 14 ~ "Low Use",
+    ActivityDate >= 15 & ActivityDate <= 21 ~ "Moderate Use", 
+    ActivityDate >= 22 & ActivityDate <= 31 ~ "High Use")) %>% 
+  mutate(usage = factor(usage, level = c('Low Use','Moderate Use','High Use'))) %>% 
+  rename(days_used = ActivityDate) %>% 
+  group_by(usage)
+head(daily_use2)
+
+
+library(ggplot2)
+
+# Count the number of users in each usage category
+usage_counts <- count(daily_use2, usage)
+print(usage_counts)
+
+#displaying a pie chart on the distribution of user types
+pie_chart <- ggplot(usage_counts, aes(x = "", y = n, fill = usage, label = scales::percent(n / sum(n)))) +
+  geom_bar(stat = "identity", width = 1) +
+  geom_text(position = position_stack(vjust = 0.5), size = 3) +
+  coord_polar("y", start = 0) + 
+  labs(title = "Distribution of User Types") +
+  scale_fill_manual(values = c( "lightpink1","lightpink3", "lightpink4"),name = "Usage") +
+  theme_void() +
+  theme(legend.position = "right")
+
+# Display the pie chart
+print(pie_chart)
+
+
+### 
+#AVERAGE CALORIES PER DAY
+
+cal_day<- daily_activity %>%
+  group_by(Day) %>%
+  summarise(mean_cal=round(mean(Calories))) %>%
+  mutate(Day=factor(Day, level=c('Monday', 'Tuesday', 'Wednesday','Thursday', 'Friday', 'Saturday', 'Sunday')))
+head(cal_day)
+
+ggplot(cal_day, aes(x = Day, y = mean_cal)) +
+  geom_bar(stat = "identity", fill = "lightpink2") +
+  geom_text(aes(label = mean_cal), vjust = -0.5, color = "black", size = 3) +labs(title = "Average Calories per Day", x = "Day", y = "Average Calories") +
+  theme_minimal()
+
+# AVERAGE STEPS PER DAY
+step_day<- daily_activity %>%
+  group_by(Day) %>%
+  summarise(mean_step=round(mean(TotalSteps))) %>%
+  mutate(Day=factor(Day, level=c('Monday', 'Tuesday', 'Wednesday','Thursday', 'Friday', 'Saturday', 'Sunday')))
+head(step_day)
+
+ggplot(step_day, aes(x = Day, y = mean_step)) +
+  geom_bar(stat = "identity", fill = "lightpink2") +
+  geom_text(aes(label = mean_step), vjust = -0.5, color = "black", size = 3) +labs(title = "Average Steps per Day", x = "Day", y = "Average Steps") +
+  theme_minimal()
+
+## TOTAL STEPS VS CALORIES BURNT
+ggplot(data = daily_activity,aes(x=TotalSteps, y=Calories)) + geom_point() + geom_smooth() + labs(title = "Total Steps vs. Calories")
+
+corr=cor(daily_steps$StepTotal,daily_calories$Calories)
+print(corr)
+
+## AVERAGE SLEEP PER DAY
+sleep_day<-na.omit(sleep_day)
+weekday_sleep <- sleep_day %>%
+  group_by(Day)%>%
+  summarise(mean_sleep=mean(Hours_slept))%>%
+  mutate(Day=factor(Day, level=c('Monday', 'Tuesday', 'Wednesday','Thursday', 'Friday', 'Saturday', 'Sunday')))
+head(weekday_sleep)
+
+ggplot(weekday_sleep, aes(x = Day, y = mean_sleep)) +
+  geom_bar(stat = "identity", fill = "lightpink3") +labs(title = "Average Hours of Sleep per Day", x = "Day", y = "Average Sleep") +
+  theme_minimal()
+
+##
+
+
+
+
+## USER ACTIVITY
+
+# sedentary < 5000
+#lightly_active >= 5000, but <= 7499
+#fairly_active >= 7500, but <= 9999
+#very_active >= 10000
+
+
+# Define the levels of activity_level
+activity_levels <- c("sedentary", "lightly_active", "fairly_active", "very_active")
+
+# Convert activity_level to factor with predefined levels
+daily_avg_steps <- daily_steps %>%
+  group_by(Id) %>%
+  summarise(daily_steps = mean(StepTotal)) %>%
+  mutate(activity_level = factor(case_when(
+    daily_steps >= 1 & daily_steps < 5000 ~ "sedentary",
+    daily_steps >= 5000 & daily_steps <= 7499 ~ "lightly_active", 
+    daily_steps >= 7500 & daily_steps <= 9999 ~ "fairly_active",
+    daily_steps >= 10000 ~ "very_active"
+  ), levels = activity_levels))
+
+# Count the number of users in each usage category
+user_count <- count(daily_avg_steps, activity_level)
+
+# Displaying a pie chart on user type
+pie_chart2 <- ggplot(user_count, aes(x = "", y = n, fill = activity_level, label = scales::percent(n / sum(n)))) +
+  geom_bar(stat = "identity", width = 1) +
+  geom_text(position = position_stack(vjust = 0.5), size = 3) +
+  coord_polar("y", start = 0) + 
+  labs(title = "User Activity Level") +
+  scale_fill_manual(values = c("lightpink" ,"lightpink2", "lightpink3", "lightpink4"), name = "Activity Level",
+                    breaks = activity_levels) +  # Set breaks to predefined levels
+  theme_void() +
+  theme(legend.position = "right")
+
+# Display the pie chart
+print(pie_chart2)
+
